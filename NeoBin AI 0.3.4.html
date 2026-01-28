@@ -1,0 +1,103 @@
+<div style="background-color: #218515; border-radius: 10px 10px 0px 0px; width: 200px; justify-content: center; display: flex; color: white; padding-top: 10px; padding-bottom: 10px; box-shadow: 5px 5px 50px #25c21f7d;">NeoBin AI V0.3.4</div>
+<div style="display: flex;">
+    <div id="webcam-container" style="box-shadow: 5px 5px 50px #25c21f7d; border-radius: 0px 0px 0px 20px;"></div>
+    <div id="label-container" style="background-color: #bbf9b3; width: 400px; justify-content: space-evenly; align-items: center; display: flex; flex-direction: column; border-radius: 0px 20px 20px 0px; box-shadow: 5px 5px 50px #25c21f7d;"></div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+<script type="text/javascript">
+    const URL = "https://teachablemachine.withgoogle.com/models/WUhkW-VES/";
+
+    let model, webcam, labelContainer, maxPredictions;
+
+    async function init() {
+        const modelURL = URL + "model.json";
+        const metadataURL = URL + "metadata.json";
+
+        model = await tmImage.load(modelURL, metadataURL);
+        maxPredictions = model.getTotalClasses();
+
+        const flip = true;
+        webcam = new tmImage.Webcam(500, 500, flip);
+
+        try {
+            await webcam.setup();
+            await webcam.play();
+            webcam.update();
+
+            document.getElementById("webcam-container").innerHTML = "";
+            document.getElementById("webcam-container").appendChild(webcam.canvas);
+            
+            labelContainer = document.getElementById("label-container");
+            labelContainer.innerHTML = "";
+            
+            for (let i = 0; i < maxPredictions + 1; i++) {
+                labelContainer.appendChild(document.createElement("div"));
+            }
+
+            window.requestAnimationFrame(loop);
+        } catch (error) {
+            console.error("Webcam setup failed: ", error);
+            alert("Échec de l'accès à la webcam. Vérifiez les permissions.");
+        }
+    }
+
+    async function loop() {
+        webcam.update();
+        await predict();
+        window.requestAnimationFrame(loop);
+    }
+
+    async function predict() {
+        const prediction = await model.predict(webcam.canvas);
+        
+        let maxProbability = 0;
+        let maxClassName = "";
+
+        for (let i = 0; i < maxPredictions; i++) {
+            const classPrediction = prediction[i].className + ": " + prediction[i].probability.toFixed(2);
+            labelContainer.childNodes[i].innerHTML = classPrediction;
+
+            labelContainer.childNodes[i].style.color = "white";
+            labelContainer.childNodes[i].style.backgroundColor = "#4dd83d";
+            labelContainer.childNodes[i].style.padding = "20px";
+            labelContainer.childNodes[i].style.borderRadius = "10px";
+            labelContainer.childNodes[i].style.width = "70%";
+            labelContainer.childNodes[i].style.opacity = Math.max(prediction[i].probability.toFixed(2), 0.4);
+            labelContainer.childNodes[i].style.transition = "0.5s";
+
+            if (prediction[i].probability > maxProbability) {
+                maxProbability = prediction[i].probability;
+                maxClassName = prediction[i].className;
+            }
+        }
+        
+        // ⚡ Envoie la détection au Raspberry Pi
+        sendToRaspberryPi(maxClassName);
+
+        const highestPredictionText = `Detection : ${maxClassName} (${maxProbability.toFixed(2)})`;
+        labelContainer.childNodes[maxPredictions].innerHTML = highestPredictionText;
+        labelContainer.childNodes[maxPredictions].style.color = "white";
+        labelContainer.childNodes[maxPredictions].style.backgroundColor = "#218515";
+        labelContainer.childNodes[maxPredictions].style.padding = "20px";
+        labelContainer.childNodes[maxPredictions].style.borderRadius = "10px";
+        labelContainer.childNodes[maxPredictions].style.width = "70%";
+
+
+        document.getElementById("webcam-container").appendChild(webcam.canvas);
+        webcam.canvas.style.borderRadius = "0px 0px 0px 20px"; // Ajoute une bordure arrondie
+    }
+    function sendToRaspberryPi(className) {
+        fetch('http://localhost:3000/receive-data', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ detection: className })
+        })
+        .then(response => response.json())
+        .then(data => console.log("Réponse du Raspberry Pi:", data))
+        .catch(error => console.error("Erreur d'envoi:", error));
+    }
+
+    // ⚡ Lancer automatiquement init() au chargement de la page
+    window.onload = init;
+</script>
